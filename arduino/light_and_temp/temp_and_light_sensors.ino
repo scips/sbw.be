@@ -1,18 +1,29 @@
 #define SAMPLE_SIZE 11
 #define SAMPLE_BY   10
 #define DELAY       500
-#define DEBUG
+//#define DEBUG
 
 #include <LiquidCrystal.h>
 
 int LightSensor = 2; //define the 1th analog pin for light sensor brick 
 int TemperatureSensor = 1;
+int MoistureSensor = 3;
+int Button = 9;
 int lights[SAMPLE_SIZE];
 int temps[SAMPLE_SIZE];
+int moistures[SAMPLE_SIZE];
 int indice = 0;
 float meanLight = 0.0;
 float meanTemp = 0.0;
+float meanMoisture = 0.0;
+int minTemp = 1024;
+int maxTemp = 0;
+int minMoisture = 1024;
+int maxMoisture = 0;
 int cpt=0;
+int buttonPressed=false;
+int buttonPreviousStatus=false;
+int displayMode=0;
 
 LiquidCrystal lcd(2,3,4,5,6,7,8);
 
@@ -21,15 +32,63 @@ void setup() {
   #ifdef DEBUG
   Serial.begin(9600);
   #endif
+  pinMode(Button,INPUT);
 }
 
 void loop() { 
   printRemainingTimeBeforeRefreshToLCD();
   int valLight=0;
   int valTemperature=0;
+  int valMoisture=0;
   valLight=analogRead(LightSensor); //Read analog level which match the luminous intensity 
   valTemperature=analogRead(TemperatureSensor);
-  storeInArray(valLight,valTemperature);
+  valMoisture=analogRead(MoistureSensor);
+  buttonPressed=digitalRead(Button);
+  
+  if(valTemperature>maxTemp){
+    maxTemp = valTemperature;
+  }else{
+    if(valTemperature<minTemp){
+      minTemp = valTemperature;
+    }
+  }
+  
+  if(valMoisture>maxMoisture){
+    maxMoisture = valMoisture;
+  }else{
+    if(valMoisture<minMoisture){
+      minMoisture = valMoisture;
+    }
+  }
+  
+  if(buttonPressed && buttonPreviousStatus==false){
+    if(displayMode<3){
+      displayMode++;
+    }else{
+      displayMode=0;
+    }
+    switch(displayMode){
+      case 0:
+        printArrays();
+        break;
+      case 1:
+        printTemperatureValues(valTemperature,minTemp,maxTemp);
+        break;
+      case 2:
+        // humidity min/max
+        printMoistureValues(valMoisture,minMoisture,maxMoisture);
+        break;
+    }
+  }
+  
+
+  if(buttonPressed){
+    buttonPressed = false;
+    buttonPreviousStatus = true;
+  }else{
+    buttonPreviousStatus = false;
+  }
+  storeInArray(valLight,valTemperature,valMoisture);
   if(cpt>=SAMPLE_BY-1){
     cpt=0;
     printArrays();
@@ -42,7 +101,7 @@ void loop() {
   delay(DELAY);
 }
 
-void storeInArray(int light,int temp) {
+void storeInArray(int light,int temp, int moisture) {
   int nextItem;
   // loop continuously in the array
   if(indice>=SAMPLE_SIZE){
@@ -50,6 +109,7 @@ void storeInArray(int light,int temp) {
   }
   lights[indice]=light;
   temps[indice]=temp;
+  moistures[indice]=moisture;
   indice++;
   nextItem=indice;
   if(nextItem>=SAMPLE_SIZE){
@@ -57,13 +117,16 @@ void storeInArray(int light,int temp) {
   }
   lights[nextItem]=0;
   temps[nextItem]=0;
+  moistures[nextItem]=0;
 }
 
 void printArrays() {
   meanLight=0.0;
   meanTemp=0.0;
+  meanMoisture=0;0;
   int tempCount=0;
   int lightCount=0;
+  int moistureCount=0;
   int i=0;
   #ifdef DEBUG
   Serial.println();
@@ -97,7 +160,38 @@ void printArrays() {
   Serial.print("/");
   Serial.println(temperature);
   #endif
-  printInfoToLCD(temperature,meanLight);
+  for(i=0;i<SAMPLE_SIZE;i++){
+    if(moistures[i]>0){
+      meanMoisture+=moistures[i];
+      moistureCount++;
+    }
+  }
+  meanMoisture = meanMoisture/moistureCount;
+  printInfoToLCD(temperature,meanLight,meanMoisture);
+}
+
+void printTemperatureValues(int nowTemperature, int minTemp, int maxTemp){
+  lcd.begin(16,2);
+  lcd.setCursor(0,0);
+  lcd.print("T: ");
+  lcd.print(convert2HumanReadableTemp(minTemp));
+  lcd.print("<");
+  lcd.print(convert2HumanReadableTemp(nowTemperature));
+  lcd.setCursor(0,1);
+  lcd.print("<");
+  lcd.print(convert2HumanReadableTemp(maxTemp));
+}
+
+void printMoistureValues(int valMoisture,int minMoisture,int maxMoisture){
+  lcd.begin(16,2);
+  lcd.setCursor(0,0);
+  lcd.print("H: ");
+  lcd.print(minMoisture);
+  lcd.print("<");
+  lcd.print(valMoisture);
+  lcd.setCursor(0,1);
+  lcd.print("<");
+  lcd.print(maxMoisture);
 }
 
 void printRemainingTimeBeforeRefreshToLCD(){
@@ -111,16 +205,19 @@ void printRemainingTimeBeforeRefreshToLCD(){
   lcd.print(countdown);
 }
 
-void printInfoToLCD(String temperature,float meanLigth){
+void printInfoToLCD(String temperature,float meanLigth,float meanMoisture){
+  lcd.begin(16, 2);
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("T: ");
+  lcd.print("T:");
   lcd.print(temperature);
   lcd.print(char(223));
   lcd.print("C");
   lcd.setCursor(0,1);
-  lcd.print("L: ");
+  lcd.print("L:");
   lcd.print(meanLight);
+  lcd.print(" H:");
+  lcd.print(meanMoisture);
 }
 
 String convert2HumanReadableTemp(float temp){
